@@ -1,0 +1,29 @@
+[Unit]
+Description=Hostd Traffic Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/collector
+Restart=always
+RestartSec=5
+
+EnvironmentFile=/etc/collector.env
+WorkingDirectory=/var/lib/collector
+
+# Required for XDP + TC + BPF maps
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_BPF CAP_SYS_RESOURCE CAP_PERFMON
+AmbientCapabilities=CAP_NET_ADMIN CAP_BPF CAP_SYS_RESOURCE CAP_PERFMON
+LimitMEMLOCK=infinity
+
+# Allow writing to SQLite DB
+ReadWritePaths=/var/lib/collector
+
+# Hardening (safe)
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

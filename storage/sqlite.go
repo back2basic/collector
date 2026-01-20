@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/back2basic/euregiohosting/collector/model"
+	"github.com/back2basic/collector/model"
 
 	_ "github.com/mattn/go-sqlite3"
 )

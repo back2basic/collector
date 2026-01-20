@@ -5,10 +5,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/back2basic/euregiohosting/collector/bpfgo"
-	"github.com/back2basic/euregiohosting/collector/dns"
-	"github.com/back2basic/euregiohosting/collector/model"
-	"github.com/back2basic/euregiohosting/collector/storage"
+	"github.com/back2basic/collector/bpfgo"
+	"github.com/back2basic/collector/dns"
+	"github.com/back2basic/collector/model"
+	"github.com/back2basic/collector/storage"
 
 	"github.com/cilium/ebpf"
 )

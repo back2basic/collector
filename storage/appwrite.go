@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/back2basic/euregiohosting/collector/model"
+	"github.com/back2basic/collector/model"
 
 	"github.com/appwrite/sdk-for-go/appwrite"
 	"github.com/appwrite/sdk-for-go/client"

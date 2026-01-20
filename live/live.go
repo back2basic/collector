@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/back2basic/euregiohosting/collector/bpfgo"
+	"github.com/back2basic/collector/bpfgo"
 
 	"github.com/cilium/ebpf"
 )

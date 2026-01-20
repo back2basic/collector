@@ -7,9 +7,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/back2basic/euregiohosting/collector/agg"
-	"github.com/back2basic/euregiohosting/collector/bpfgo"
-	"github.com/back2basic/euregiohosting/collector/live"
+	"github.com/back2basic/collector/agg"
+	"github.com/back2basic/collector/bpfgo"
+	"github.com/back2basic/collector/live"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-module github.com/back2basic/euregiohosting/collector
+module github.com/back2basic/collector
 
 go 1.24.0
 

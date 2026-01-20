@@ -57,7 +57,7 @@ The collector is designed for **production**, with:
 ### Build + Install
 
 ```bash
-make install
+sudo make install
 ```
 
 This will:
@@ -147,13 +147,13 @@ Each row contains:
 ### Build only
 
 ```bash
-make build
+sudo make build
 ```
 
 ### Uninstall
 
 ```bash
-make uninstall
+sudo make uninstall
 ```
 
 This removes:

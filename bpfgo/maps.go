@@ -8,13 +8,14 @@ import (
 )
 
 type SiaIPStats struct {
-    Up9981      uint64
-    Down9981    uint64
-    Up9984TCP   uint64
-    Down9984TCP uint64
-    Up9984UDP   uint64
-    Down9984UDP uint64
+    ConsensusUp   uint64
+    ConsensusDown uint64
+    SiamuxUp      uint64
+    SiamuxDown    uint64
+    QuicUp        uint64
+    QuicDown      uint64
 }
+
 
 func openPinned(path string) (*ebpf.Map, error) {
     return ebpf.LoadPinnedMap(path, nil)
@@ -60,12 +61,12 @@ func CleanupZeroEntries() {
         var val SiaIPStats
 
         for it.Next(&key, &val) {
-            if val.Up9981 == 0 &&
-                val.Down9981 == 0 &&
-                val.Up9984TCP == 0 &&
-                val.Down9984TCP == 0 &&
-                val.Up9984UDP == 0 &&
-                val.Down9984UDP == 0 {
+            if val.ConsensusUp == 0 &&
+                val.ConsensusDown == 0 &&
+                val.SiamuxUp == 0 &&
+                val.SiamuxDown == 0 &&
+                val.QuicUp == 0 &&
+                val.QuicDown == 0 {
                 _ = m.Delete(key)
             }
         }

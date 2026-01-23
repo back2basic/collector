@@ -77,12 +77,12 @@ func flushToSQLite(hostname string) {
 				Key:         key,
 				IP:          ip.String(),
 				DNS:         name,
-				Up9981:      val.ConsensusUp,
-				Down9981:    0,
-				Up9984TCP:   val.SiamuxUp,
-				Down9984TCP: 0,
-				Up9984UDP:   val.QuicUp,
-				Down9984UDP: 0,
+				ConsensusUp:      val.ConsensusUp,
+				ConsensusDown:    0,
+				SiamuxUp:   val.SiamuxUp,
+				SiamuxDown: 0,
+				QuicUp:   val.QuicUp,
+				QuicDown: 0,
 				Timestamp:   now,
 			})
 		}
@@ -108,12 +108,12 @@ func flushToSQLite(hostname string) {
 				Key:         key,
 				IP:          ip.String(),
 				DNS:         name,
-				Up9981:      0,
-				Down9981:    val.ConsensusDown,
-				Up9984TCP:   0,
-				Down9984TCP: val.SiamuxDown,
-				Up9984UDP:   0,
-				Down9984UDP: val.QuicDown,
+				ConsensusUp:      0,
+				ConsensusDown:    val.ConsensusDown,
+				SiamuxUp:   0,
+				SiamuxDown: val.SiamuxDown,
+				QuicUp:   0,
+				QuicDown: val.QuicDown,
 				Timestamp:   now,
 			})
 		}
@@ -139,12 +139,12 @@ func flushToSQLite(hostname string) {
 				Key:         key,
 				IP:          ip.String(),
 				DNS:         name,
-				Up9981:      val.ConsensusUp,
-				Down9981:    0,
-				Up9984TCP:   val.SiamuxUp,
-				Down9984TCP: 0,
-				Up9984UDP:   val.QuicUp,
-				Down9984UDP: 0,
+				ConsensusUp:      val.ConsensusUp,
+				ConsensusDown:    0,
+				SiamuxUp:   val.SiamuxUp,
+				SiamuxDown: 0,
+				QuicUp:   val.QuicUp,
+				QuicDown: 0,
 				Timestamp:   now,
 			})
 		}
@@ -170,12 +170,12 @@ func flushToSQLite(hostname string) {
 				Key:         key,
 				IP:          ip.String(),
 				DNS:         name,
-				Up9981:      0,
-				Down9981:    val.ConsensusDown,
-				Up9984TCP:   0,
-				Down9984TCP: val.SiamuxDown,
-				Up9984UDP:   0,
-				Down9984UDP: val.QuicDown,
+				ConsensusUp:      0,
+				ConsensusDown:    val.ConsensusDown,
+				SiamuxUp:   0,
+				SiamuxDown: val.SiamuxDown,
+				QuicUp:   0,
+				QuicDown: val.QuicDown,
 				Timestamp:   now,
 			})
 		}
@@ -264,21 +264,21 @@ func resetBPFMaps(rec4 []model.TrafficRecord4, rec6 []model.TrafficRecord6) {
 }
 
 func isZeroStats(r model.TrafficRecord4) bool {
-	return r.Up9981 == 0 &&
-		r.Down9981 == 0 &&
-		r.Up9984TCP == 0 &&
-		r.Down9984TCP == 0 &&
-		r.Up9984UDP == 0 &&
-		r.Down9984UDP == 0
+	return r.ConsensusUp == 0 &&
+		r.ConsensusDown == 0 &&
+		r.SiamuxUp == 0 &&
+		r.SiamuxDown == 0 &&
+		r.QuicUp == 0 &&
+		r.QuicDown == 0
 }
 
 func isZeroStats6(r model.TrafficRecord6) bool {
-	return r.Up9981 == 0 &&
-		r.Down9981 == 0 &&
-		r.Up9984TCP == 0 &&
-		r.Down9984TCP == 0 &&
-		r.Up9984UDP == 0 &&
-		r.Down9984UDP == 0
+	return r.ConsensusUp == 0 &&
+		r.ConsensusDown == 0 &&
+		r.SiamuxUp == 0 &&
+		r.SiamuxDown == 0 &&
+		r.QuicUp == 0 &&
+		r.QuicDown == 0
 }
 
 func pushDailyToAppwrite(hostname string) {

@@ -69,7 +69,7 @@ func flushToSQLite(hostname string) {
 			name := dns.Resolve(ip)
 
 			// skip if value are 0
-			if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
+			if val.ConsensusUp == 0 && val.SiamuxUp == 0 && val.QuicUp == 0 {
 				continue
 			}
 
@@ -77,11 +77,11 @@ func flushToSQLite(hostname string) {
 				Key:         key,
 				IP:          ip.String(),
 				DNS:         name,
-				Up9981:      val.Up9981,
+				Up9981:      val.ConsensusUp,
 				Down9981:    0,
-				Up9984TCP:   val.Up9984TCP,
+				Up9984TCP:   val.SiamuxUp,
 				Down9984TCP: 0,
-				Up9984UDP:   val.Up9984UDP,
+				Up9984UDP:   val.QuicUp,
 				Down9984UDP: 0,
 				Timestamp:   now,
 			})
@@ -100,7 +100,7 @@ func flushToSQLite(hostname string) {
 			name := dns.Resolve(ip)
 
 			// skip if value are 0
-			if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
+			if val.ConsensusDown == 0 && val.SiamuxDown == 0 && val.QuicDown == 0 {
 				continue
 			}
 
@@ -109,11 +109,11 @@ func flushToSQLite(hostname string) {
 				IP:          ip.String(),
 				DNS:         name,
 				Up9981:      0,
-				Down9981:    val.Down9981,
+				Down9981:    val.ConsensusDown,
 				Up9984TCP:   0,
-				Down9984TCP: val.Down9984TCP,
+				Down9984TCP: val.SiamuxDown,
 				Up9984UDP:   0,
-				Down9984UDP: val.Down9984UDP,
+				Down9984UDP: val.QuicDown,
 				Timestamp:   now,
 			})
 		}
@@ -131,7 +131,7 @@ func flushToSQLite(hostname string) {
 			name := dns.Resolve(ip)
 
 			// skip if value are 0
-			if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
+			if val.ConsensusUp == 0 && val.SiamuxUp == 0 && val.QuicUp == 0 {
 				continue
 			}
 
@@ -139,11 +139,11 @@ func flushToSQLite(hostname string) {
 				Key:         key,
 				IP:          ip.String(),
 				DNS:         name,
-				Up9981:      val.Up9981,
+				Up9981:      val.ConsensusUp,
 				Down9981:    0,
-				Up9984TCP:   val.Up9984TCP,
+				Up9984TCP:   val.SiamuxUp,
 				Down9984TCP: 0,
-				Up9984UDP:   val.Up9984UDP,
+				Up9984UDP:   val.QuicUp,
 				Down9984UDP: 0,
 				Timestamp:   now,
 			})
@@ -162,7 +162,7 @@ func flushToSQLite(hostname string) {
 			name := dns.Resolve(ip)
 
 			// skip if value are 0
-			if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
+			if val.ConsensusDown == 0 && val.SiamuxDown == 0 && val.QuicDown == 0 {
 				continue
 			}
 
@@ -171,11 +171,11 @@ func flushToSQLite(hostname string) {
 				IP:          ip.String(),
 				DNS:         name,
 				Up9981:      0,
-				Down9981:    val.Down9981,
+				Down9981:    val.ConsensusDown,
 				Up9984TCP:   0,
-				Down9984TCP: val.Down9984TCP,
+				Down9984TCP: val.SiamuxDown,
 				Up9984UDP:   0,
-				Down9984UDP: val.Down9984UDP,
+				Down9984UDP: val.QuicDown,
 				Timestamp:   now,
 			})
 		}

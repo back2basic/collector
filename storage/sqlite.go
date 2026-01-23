@@ -35,12 +35,12 @@ func init() {
         hostname TEXT,
         ip TEXT,
         dns TEXT,
-        up_9981 INTEGER,
-        down_9981 INTEGER,
-        up_9984_tcp INTEGER,
-        down_9984_tcp INTEGER,
-        up_9984_udp INTEGER,
-        down_9984_udp INTEGER,
+        consensus_up INTEGER,
+        consensus_down INTEGER,
+        siamux_up INTEGER,
+        siamux_down INTEGER,
+        quic_up INTEGER,
+        quic_down INTEGER,
         timestamp INTEGER
     );
     `
@@ -58,9 +58,9 @@ func FlushSQLite(hostname string, rec4 []model.TrafficRecord4, rec6 []model.Traf
 	stmt, err := tx.Prepare(`
         INSERT INTO traffic (
             hostname, ip, dns,
-            up_9981, down_9981,
-            up_9984_tcp, down_9984_tcp,
-            up_9984_udp, down_9984_udp,
+            consensus_up, consensus_down,
+            siamux_up, siamux_down,
+            quic_up, quic_down,
             timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
@@ -72,9 +72,9 @@ func FlushSQLite(hostname string, rec4 []model.TrafficRecord4, rec6 []model.Traf
 	for _, r := range rec4 {
 		_, err = stmt.Exec(
 			hostname, r.IP, r.DNS,
-			r.Up9981, r.Down9981,
-			r.Up9984TCP, r.Down9984TCP,
-			r.Up9984UDP, r.Down9984UDP,
+			r.ConsensusUp, r.ConsensusDown,
+			r.SiamuxUp, r.SiamuxDown,
+			r.QuicUp, r.QuicDown,
 			r.Timestamp,
 		)
 		if err != nil {
@@ -86,9 +86,9 @@ func FlushSQLite(hostname string, rec4 []model.TrafficRecord4, rec6 []model.Traf
 	for _, r := range rec6 {
 		_, err = stmt.Exec(
 			hostname, r.IP, r.DNS,
-			r.Up9981, r.Down9981,
-			r.Up9984TCP, r.Down9984TCP,
-			r.Up9984UDP, r.Down9984UDP,
+			r.ConsensusUp, r.ConsensusDown,
+			r.SiamuxUp, r.SiamuxDown,
+			r.QuicUp, r.QuicDown,
 			r.Timestamp,
 		)
 		if err != nil {
@@ -105,12 +105,12 @@ func QueryDailyTotals() ([]model.AggregatedRecord, error) {
 
 	rows, err := db.Query(`
         SELECT ip, dns,
-               SUM(up_9981),
-               SUM(down_9981),
-               SUM(up_9984_tcp),
-               SUM(down_9984_tcp),
-               SUM(up_9984_udp),
-               SUM(down_9984_udp)
+               SUM(consensus_up),
+               SUM(consensus_down),
+               SUM(siamux_up),
+               SUM(siamux_down),
+               SUM(quic_up),
+               SUM(quic_down)
         FROM traffic
         WHERE timestamp >= ?
         GROUP BY ip
@@ -126,9 +126,9 @@ func QueryDailyTotals() ([]model.AggregatedRecord, error) {
 		var r model.AggregatedRecord
 		err := rows.Scan(
 			&r.IP, &r.DNS,
-			&r.Up9981, &r.Down9981,
-			&r.Up9984TCP, &r.Down9984TCP,
-			&r.Up9984UDP, &r.Down9984UDP,
+			&r.ConsensusUp, &r.ConsensusDown,
+			&r.SiamuxUp, &r.SiamuxDown,
+			&r.QuicUp, &r.QuicDown,
 		)
 		if err != nil {
 			return nil, err

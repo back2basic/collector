@@ -1,199 +1,251 @@
 package bpfgo
 
 import (
-    "encoding/binary"
-    "fmt"
-    "log"
-    "net"
-    "os"
-    "syscall"
+	"encoding/binary"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"strconv"
+	"syscall"
+	"unsafe"
 
-    "github.com/cilium/ebpf"
-    "github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 )
 
 const (
-    bpfObjPath = "bpf/sia_bpfel.o"
-    bpfFsMount = "/sys/fs/bpf"
+	PORT_CONSENSUS = 1
+	PORT_SIAMUX    = 2
+	PORT_QUIC      = 3
+)
 
-    PinHostIPv4 = "/sys/fs/bpf/host_ipv4"
-    PinHostIPv6 = "/sys/fs/bpf/host_ipv6"
-    PinTCDebug  = "/sys/fs/bpf/tc_debug"
-    PinTCLastIP = "/sys/fs/bpf/tc_last_ip"
+const (
+	bpfObjPath = "bpf/sia_bpfel.o"
+	bpfFsMount = "/sys/fs/bpf"
 
-    PinIP4Down = "/sys/fs/bpf/ip4_bytes_down"
-    PinIP4Up   = "/sys/fs/bpf/ip4_bytes_up"
-    PinIP6Down = "/sys/fs/bpf/ip6_bytes_down"
-    PinIP6Up   = "/sys/fs/bpf/ip6_bytes_up"
+	PinHostIPv4 = "/sys/fs/bpf/host_ipv4"
+	PinHostIPv6 = "/sys/fs/bpf/host_ipv6"
+	PinTCDebug  = "/sys/fs/bpf/tc_debug"
+	PinTCLastIP = "/sys/fs/bpf/tc_last_ip"
 
-    progXDP      = "xdp_prog"
-    progTCEgress = "tc_egress"
+	PinIP4Down = "/sys/fs/bpf/ip4_bytes_down"
+	PinIP4Up   = "/sys/fs/bpf/ip4_bytes_up"
+	PinIP6Down = "/sys/fs/bpf/ip6_bytes_down"
+	PinIP6Up   = "/sys/fs/bpf/ip6_bytes_up"
+
+	progXDP      = "xdp_prog"
+	progTCEgress = "tc_egress"
 )
 
 type Handles struct {
-    Coll    *ebpf.Collection
-    XDPLink link.Link
-    TCLink  link.Link
+	Coll    *ebpf.Collection
+	XDPLink link.Link
+	TCLink  link.Link
 }
 
 func (h *Handles) Close() {
-    if h.XDPLink != nil {
-        _ = h.XDPLink.Close()
-    }
-    if h.TCLink != nil {
-        _ = h.TCLink.Close()
-    }
-    if h.Coll != nil {
-        h.Coll.Close()
-    }
-    UnloadPinned()
+	if h.XDPLink != nil {
+		_ = h.XDPLink.Close()
+	}
+	if h.TCLink != nil {
+		_ = h.TCLink.Close()
+	}
+	if h.Coll != nil {
+		h.Coll.Close()
+	}
+	UnloadPinned()
+}
+
+func loadPorts(coll *ebpf.Collection) error {
+	portMap, ok := coll.Maps["port_config"]
+	if !ok {
+		return fmt.Errorf("port_config map not found in BPF object")
+	}
+
+	type portEntry struct {
+		key uint32
+		env string
+	}
+
+	ports := []portEntry{
+		{PORT_CONSENSUS, "PORT_SIA_CONSENSUS"},
+		{PORT_SIAMUX, "PORT_RHP4_SIAMUX"},
+		{PORT_QUIC, "PORT_RHP4_QUIC"},
+	}
+
+	for _, p := range ports {
+		valStr := os.Getenv(p.env)
+		if valStr == "" {
+			continue
+		}
+
+		port, err := strconv.Atoi(valStr)
+		if err != nil {
+			return fmt.Errorf("invalid port in %s: %v", p.env, err)
+		}
+
+		v := uint16(port)
+		k := uint32(p.key)
+
+		if err := portMap.Put(unsafe.Pointer(&k), unsafe.Pointer(&v)); err != nil {
+			return fmt.Errorf("failed to load %s into port_config: %v", p.env, err)
+		}
+	}
+
+	return nil
 }
 
 func ensureBPFFS() {
-    if fi, err := os.Stat(bpfFsMount); err != nil || !fi.IsDir() {
-        _ = os.MkdirAll(bpfFsMount, 0755)
-    }
-    _ = syscall.Mount("bpf", bpfFsMount, "bpf", 0, "")
+	if fi, err := os.Stat(bpfFsMount); err != nil || !fi.IsDir() {
+		_ = os.MkdirAll(bpfFsMount, 0755)
+	}
+	_ = syscall.Mount("bpf", bpfFsMount, "bpf", 0, "")
 }
 
 func ifaceIndex(name string) int {
-    ifi, err := net.InterfaceByName(name)
-    if err != nil {
-        log.Fatalf("get interface %s: %v", name, err)
-    }
-    return ifi.Index
+	ifi, err := net.InterfaceByName(name)
+	if err != nil {
+		log.Fatalf("get interface %s: %v", name, err)
+	}
+	return ifi.Index
 }
 
 func hostAddrs(iface string) (net.IP, net.IP) {
-    ifi, err := net.InterfaceByName(iface)
-    if err != nil {
-        log.Fatalf("get interface %s: %v", iface, err)
-    }
-    addrs, err := ifi.Addrs()
-    if err != nil {
-        log.Fatalf("get addrs for %s: %v", iface, err)
-    }
+	ifi, err := net.InterfaceByName(iface)
+	if err != nil {
+		log.Fatalf("get interface %s: %v", iface, err)
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		log.Fatalf("get addrs for %s: %v", iface, err)
+	}
 
-    var v4, v6 net.IP
-    for _, a := range addrs {
-        if ipnet, ok := a.(*net.IPNet); ok {
-            ip := ipnet.IP
-            if ip4 := ip.To4(); ip4 != nil {
-                v4 = ip4
-            } else if ip6 := ip.To16(); ip6 != nil {
-                v6 = ip6
-            }
-        }
-    }
-    return v4, v6
+	var v4, v6 net.IP
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			ip := ipnet.IP
+			if ip4 := ip.To4(); ip4 != nil {
+				v4 = ip4
+			} else if ip6 := ip.To16(); ip6 != nil {
+				v6 = ip6
+			}
+		}
+	}
+	return v4, v6
 }
 
 func ip4ToU32(ip net.IP) uint32 {
-    return binary.BigEndian.Uint32(ip.To4())
+	return binary.BigEndian.Uint32(ip.To4())
 }
 
 func Load(iface string) (*Handles, error) {
-    ensureBPFFS()
 
-    spec, err := ebpf.LoadCollectionSpec(bpfObjPath)
-    if err != nil {
-        return nil, fmt.Errorf("load BPF spec: %w", err)
-    }
+	ensureBPFFS()
 
-    coll, err := ebpf.NewCollection(spec)
-    if err != nil {
-        return nil, fmt.Errorf("new collection: %w", err)
-    }
+	spec, err := ebpf.LoadCollectionSpec(bpfObjPath)
+	if err != nil {
+		return nil, fmt.Errorf("load BPF spec: %w", err)
+	}
 
-    xdpProg := coll.Programs[progXDP]
-    tcProg := coll.Programs[progTCEgress]
-    if xdpProg == nil || tcProg == nil {
-        coll.Close()
-        return nil, fmt.Errorf("missing XDP or TC program")
-    }
+	coll, err := ebpf.NewCollection(spec)
+	if err != nil {
+		return nil, fmt.Errorf("new collection: %w", err)
+	}
 
-    ifIndex := ifaceIndex(iface)
+	if err := loadPorts(coll); err != nil {
+		return nil, fmt.Errorf("loadPorts: %w", err)
+	}
 
-    xdpLink, err := link.AttachXDP(link.XDPOptions{
-        Program:   xdpProg,
-        Interface: ifIndex,
-        Flags:     link.XDPGenericMode,
-    })
-    if err != nil {
-        coll.Close()
-        return nil, fmt.Errorf("attach XDP: %w", err)
-    }
+	xdpProg := coll.Programs[progXDP]
+	tcProg := coll.Programs[progTCEgress]
+	if xdpProg == nil || tcProg == nil {
+		coll.Close()
+		return nil, fmt.Errorf("missing XDP or TC program")
+	}
 
-    tcLink, err := link.AttachTCX(link.TCXOptions{
-        Program:   tcProg,
-        Interface: ifIndex,
-        Attach:    ebpf.AttachTCXEgress,
-    })
-    if err != nil {
-        xdpLink.Close()
-        coll.Close()
-        return nil, fmt.Errorf("attach TC: %w", err)
-    }
+	ifIndex := ifaceIndex(iface)
 
-    maps := map[string]string{
-        "ip4_bytes_down": PinIP4Down,
-        "ip4_bytes_up":   PinIP4Up,
-        "ip6_bytes_down": PinIP6Down,
-        "ip6_bytes_up":   PinIP6Up,
-        "host_ipv4":      PinHostIPv4,
-        "host_ipv6":      PinHostIPv6,
-        "tc_debug":       PinTCDebug,
-        "tc_last_ip":     PinTCLastIP,
-    }
-    for name, path := range maps {
-        m := coll.Maps[name]
-        if m == nil {
-            xdpLink.Close()
-            tcLink.Close()
-            coll.Close()
-            return nil, fmt.Errorf("missing map %s", name)
-        }
-        if err := m.Pin(path); err != nil {
-            xdpLink.Close()
-            tcLink.Close()
-            coll.Close()
-            return nil, fmt.Errorf("pin %s: %w", name, err)
-        }
-    }
+	xdpLink, err := link.AttachXDP(link.XDPOptions{
+		Program:   xdpProg,
+		Interface: ifIndex,
+		Flags:     link.XDPGenericMode,
+	})
+	if err != nil {
+		coll.Close()
+		return nil, fmt.Errorf("attach XDP: %w", err)
+	}
 
-    host4, host6 := hostAddrs(iface)
-    if host4 != nil {
-        val := ip4ToU32(host4)
-        key := uint32(0)
-        if err := coll.Maps["host_ipv4"].Put(&key, &val); err != nil {
-            log.Fatalf("write host_ipv4: %v", err)
-        }
-        log.Printf("host IPv4: %s", host4.String())
-    }
-    if host6 != nil {
-        key := uint32(0)
-        var v [16]byte
-        copy(v[:], host6.To16())
-        if err := coll.Maps["host_ipv6"].Put(&key, &v); err != nil {
-            log.Fatalf("write host_ipv6: %v", err)
-        }
-        log.Printf("host IPv6: %s", host6.String())
-    }
+	tcLink, err := link.AttachTCX(link.TCXOptions{
+		Program:   tcProg,
+		Interface: ifIndex,
+		Attach:    ebpf.AttachTCXEgress,
+	})
+	if err != nil {
+		xdpLink.Close()
+		coll.Close()
+		return nil, fmt.Errorf("attach TC: %w", err)
+	}
 
-    log.Printf("BPF loaded on %s", iface)
+	maps := map[string]string{
+		"ip4_bytes_down": PinIP4Down,
+		"ip4_bytes_up":   PinIP4Up,
+		"ip6_bytes_down": PinIP6Down,
+		"ip6_bytes_up":   PinIP6Up,
+		"host_ipv4":      PinHostIPv4,
+		"host_ipv6":      PinHostIPv6,
+		"tc_debug":       PinTCDebug,
+		"tc_last_ip":     PinTCLastIP,
+	}
+	for name, path := range maps {
+		m := coll.Maps[name]
+		if m == nil {
+			xdpLink.Close()
+			tcLink.Close()
+			coll.Close()
+			return nil, fmt.Errorf("missing map %s", name)
+		}
+		if err := m.Pin(path); err != nil {
+			xdpLink.Close()
+			tcLink.Close()
+			coll.Close()
+			return nil, fmt.Errorf("pin %s: %w", name, err)
+		}
+	}
 
-    return &Handles{
-        Coll:    coll,
-        XDPLink: xdpLink,
-        TCLink:  tcLink,
-    }, nil
+	host4, host6 := hostAddrs(iface)
+	if host4 != nil {
+		val := ip4ToU32(host4)
+		key := uint32(0)
+		if err := coll.Maps["host_ipv4"].Put(&key, &val); err != nil {
+			log.Fatalf("write host_ipv4: %v", err)
+		}
+		log.Printf("host IPv4: %s", host4.String())
+	}
+	if host6 != nil {
+		key := uint32(0)
+		var v [16]byte
+		copy(v[:], host6.To16())
+		if err := coll.Maps["host_ipv6"].Put(&key, &v); err != nil {
+			log.Fatalf("write host_ipv6: %v", err)
+		}
+		log.Printf("host IPv6: %s", host6.String())
+	}
+
+	log.Printf("BPF loaded on %s", iface)
+
+	return &Handles{
+		Coll:    coll,
+		XDPLink: xdpLink,
+		TCLink:  tcLink,
+	}, nil
 }
 
 func UnloadPinned() {
-    for _, p := range []string{
-        PinHostIPv4, PinHostIPv6, PinTCDebug, PinTCLastIP,
-        PinIP4Down, PinIP4Up, PinIP6Down, PinIP6Up,
-    } {
-        _ = os.Remove(p)
-    }
+	for _, p := range []string{
+		PinHostIPv4, PinHostIPv6, PinTCDebug, PinTCLastIP,
+		PinIP4Down, PinIP4Up, PinIP6Down, PinIP6Up,
+	} {
+		_ = os.Remove(p)
+	}
 }

@@ -32,11 +32,11 @@ func dumpDown4() {
 	for it.Next(&key, &val) {
 		ip := bpfgo.IntToIP4(key)
         // skip if value are 0
-        if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
+        if val.ConsensusDown == 0 && val.SiamuxDown == 0 && val.QuicDown == 0 {
             continue
         }
-		fmt.Printf("DOWN4: ip=%s  down_9981=%d  down_9984_tcp=%d  down_9984_udp=%d\n",
-			ip, val.Down9981, val.Down9984TCP, val.Down9984UDP)
+		fmt.Printf("DOWN4: ip=%s  consensus=%d  siamux=%d  quic=%d\n",
+			ip, val.ConsensusDown, val.SiamuxDown, val.QuicDown)
 	}
 }
 
@@ -54,11 +54,11 @@ func dumpUp4() {
 	for it.Next(&key, &val) {
 		ip := bpfgo.IntToIP4(key)
         // skip if value are 0
-        if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
+        if val.ConsensusUp == 0 && val.SiamuxUp == 0 && val.QuicUp == 0 {
             continue
         }
-		fmt.Printf("UP4:   ip=%s  up_9981=%d  up_9984_tcp=%d  up_9984_udp=%d\n",
-			ip, val.Up9981, val.Up9984TCP, val.Up9984UDP)
+		fmt.Printf("UP4:   ip=%s  consensus=%d  siamux=%d  quic=%d\n",
+			ip, val.ConsensusUp, val.SiamuxUp, val.QuicUp)
 	}
 }
 
@@ -76,11 +76,11 @@ func dumpDown6() {
 	for it.Next(&key, &val) {
 		ip := bpfgo.IPv6FromKey(key)
         // skip if value are 0
-        if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
+        if val.ConsensusDown == 0 && val.SiamuxDown == 0 && val.QuicDown == 0 {
             continue
         }
-		fmt.Printf("DOWN6: ip=%s  down_9981=%d  down_9984_tcp=%d  down_9984_udp=%d\n",
-			ip, val.Down9981, val.Down9984TCP, val.Down9984UDP)
+		fmt.Printf("DOWN6: ip=%s  consensus=%d  siamux=%d  quic=%d\n",
+			ip, val.ConsensusDown, val.SiamuxDown, val.QuicDown)
 	}
 }
 
@@ -98,11 +98,11 @@ func dumpUp6() {
 	for it.Next(&key, &val) {
 		ip := bpfgo.IPv6FromKey(key)
         // skip if value are 0
-        if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
+        if val.ConsensusUp == 0 && val.SiamuxUp == 0 && val.QuicUp == 0 {
             continue
         }
-		fmt.Printf("UP6:   ip=%s  up_9981=%d  up_9984_tcp=%d  up_9984_udp=%d\n",
-			ip, val.Up9981, val.Up9984TCP, val.Up9984UDP)
+		fmt.Printf("UP6:   ip=%s  consensus=%d  siamux=%d  quic=%d\n",
+			ip, val.ConsensusUp, val.SiamuxUp, val.QuicUp)
 	}
 }
 

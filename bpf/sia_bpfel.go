@@ -22,13 +22,13 @@ type SiaIn6Addr struct {
 }
 
 type SiaSiaIpStats struct {
-	_           structs.HostLayout
-	Up9981      uint64
-	Down9981    uint64
-	Up9984Tcp   uint64
-	Down9984Tcp uint64
-	Up9984Udp   uint64
-	Down9984Udp uint64
+	_             structs.HostLayout
+	ConsensusUp   uint64
+	ConsensusDown uint64
+	SiamuxUp      uint64
+	SiamuxDown    uint64
+	QuicUp        uint64
+	QuicDown      uint64
 }
 
 // LoadSia returns the embedded CollectionSpec for Sia.
@@ -73,22 +73,18 @@ type SiaSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SiaProgramSpecs struct {
-	TcEgress *ebpf.ProgramSpec `ebpf:"tc_egress"`
-	XdpProg  *ebpf.ProgramSpec `ebpf:"xdp_prog"`
+	TcEgress   *ebpf.ProgramSpec `ebpf:"tc_egress"`
+	XdpIngress *ebpf.ProgramSpec `ebpf:"xdp_ingress"`
 }
 
 // SiaMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SiaMapSpecs struct {
-	HostIpv4     *ebpf.MapSpec `ebpf:"host_ipv4"`
-	HostIpv6     *ebpf.MapSpec `ebpf:"host_ipv6"`
-	Ip4BytesDown *ebpf.MapSpec `ebpf:"ip4_bytes_down"`
-	Ip4BytesUp   *ebpf.MapSpec `ebpf:"ip4_bytes_up"`
-	Ip6BytesDown *ebpf.MapSpec `ebpf:"ip6_bytes_down"`
-	Ip6BytesUp   *ebpf.MapSpec `ebpf:"ip6_bytes_up"`
-	TcDebug      *ebpf.MapSpec `ebpf:"tc_debug"`
-	TcLastIp     *ebpf.MapSpec `ebpf:"tc_last_ip"`
+	Ip4Stats   *ebpf.MapSpec `ebpf:"ip4_stats"`
+	Ip6Stats   *ebpf.MapSpec `ebpf:"ip6_stats"`
+	PortConfig *ebpf.MapSpec `ebpf:"port_config"`
+	TcLastIp4  *ebpf.MapSpec `ebpf:"tc_last_ip4"`
 }
 
 // SiaVariableSpecs contains global variables before they are loaded into the kernel.
@@ -117,26 +113,18 @@ func (o *SiaObjects) Close() error {
 //
 // It can be passed to LoadSiaObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SiaMaps struct {
-	HostIpv4     *ebpf.Map `ebpf:"host_ipv4"`
-	HostIpv6     *ebpf.Map `ebpf:"host_ipv6"`
-	Ip4BytesDown *ebpf.Map `ebpf:"ip4_bytes_down"`
-	Ip4BytesUp   *ebpf.Map `ebpf:"ip4_bytes_up"`
-	Ip6BytesDown *ebpf.Map `ebpf:"ip6_bytes_down"`
-	Ip6BytesUp   *ebpf.Map `ebpf:"ip6_bytes_up"`
-	TcDebug      *ebpf.Map `ebpf:"tc_debug"`
-	TcLastIp     *ebpf.Map `ebpf:"tc_last_ip"`
+	Ip4Stats   *ebpf.Map `ebpf:"ip4_stats"`
+	Ip6Stats   *ebpf.Map `ebpf:"ip6_stats"`
+	PortConfig *ebpf.Map `ebpf:"port_config"`
+	TcLastIp4  *ebpf.Map `ebpf:"tc_last_ip4"`
 }
 
 func (m *SiaMaps) Close() error {
 	return _SiaClose(
-		m.HostIpv4,
-		m.HostIpv6,
-		m.Ip4BytesDown,
-		m.Ip4BytesUp,
-		m.Ip6BytesDown,
-		m.Ip6BytesUp,
-		m.TcDebug,
-		m.TcLastIp,
+		m.Ip4Stats,
+		m.Ip6Stats,
+		m.PortConfig,
+		m.TcLastIp4,
 	)
 }
 
@@ -150,14 +138,14 @@ type SiaVariables struct {
 //
 // It can be passed to LoadSiaObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SiaPrograms struct {
-	TcEgress *ebpf.Program `ebpf:"tc_egress"`
-	XdpProg  *ebpf.Program `ebpf:"xdp_prog"`
+	TcEgress   *ebpf.Program `ebpf:"tc_egress"`
+	XdpIngress *ebpf.Program `ebpf:"xdp_ingress"`
 }
 
 func (p *SiaPrograms) Close() error {
 	return _SiaClose(
 		p.TcEgress,
-		p.XdpProg,
+		p.XdpIngress,
 	)
 }
 

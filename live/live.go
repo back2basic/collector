@@ -35,6 +35,14 @@ func (l *Live) printStats() {
     var st bpfgo.SiaIPStats
 
     for iter.Next(&ip, &st) {
+				if st.ConsensusDown == 0 &&
+					st.ConsensusUp == 0 &&
+					st.SiamuxDown == 0 &&
+					st.SiamuxUp == 0 &&
+					st.QuicDown == 0 &&
+					st.QuicUp == 0 {
+					continue
+				}
         addr := net.IPv4(byte(ip), byte(ip>>8), byte(ip>>16), byte(ip>>24))
         fmt.Printf("IPv4 %s  consensus(down/up)=%d/%d  siamux(down/up)=%d/%d  quic(down/up)=%d/%d\n",
             addr.String(),
@@ -50,6 +58,14 @@ func (l *Live) printStats() {
     var st6 bpfgo.SiaIPStats
 
     for iter6.Next(&ip6, &st6) {
+				if st6.ConsensusDown == 0 &&
+					st6.ConsensusUp == 0 &&
+					st6.SiamuxDown == 0 &&
+					st6.SiamuxUp == 0 &&
+					st6.QuicDown == 0 &&
+					st6.QuicUp == 0 {
+					continue
+				}
         fmt.Printf("IPv6 %s  consensus(down/up)=%d/%d  siamux(down/up)=%d/%d  quic(down/up)=%d/%d\n",
             ip6.String(),
             st6.ConsensusDown, st6.ConsensusUp,

@@ -26,6 +26,9 @@ install: build
 		echo 'SIA_HOSTNAME=""' > $(ENVFILE); \
 				echo 'INTERFACE="eth0"' >> $(ENVFILE); \
 		echo 'SQLITE_PATH="/var/lib/collector/traffic.db"' >> $(ENVFILE); \
+		echo 'PORT_SIA_CONSENSUS="9981"' >> $(ENVFILE); \
+		echo 'PORT_RHP4_SIAMUX="9984"' >> $(ENVFILE); \
+		echo 'PORT_RHP4_QUIC="9984"' >> $(ENVFILE); \
 		chmod 0644 $(ENVFILE); \
 	fi
 

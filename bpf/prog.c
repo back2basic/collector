@@ -1,4 +1,5 @@
 // prog.c - Sia host traffic collector (consensus/siamux/quic)
+// Counts full on-wire bytes (Ethernet frame) per client IP and per configured ports.
 
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
@@ -58,22 +59,6 @@ static __always_inline __u16 get_port(__u32 name)
 {
     __u16 *p = bpf_map_lookup_elem(&port_config, &name);
     return p ? *p : 0;
-}
-
-static __always_inline void account_stats(struct sia_ip_stats *st,
-                                          __u8 proto, __u16 dport,
-                                          bool egress)
-{
-    __u16 p_consensus = get_port(PORT_CONSENSUS);
-    __u16 p_siamux    = get_port(PORT_SIAMUX);
-    __u16 p_quic      = get_port(PORT_QUIC);
-
-    __u64 bytes = 0;
-
-    // We don't have packet length here yet; caller must set bytes.
-    // This function assumes st and bytes are valid.
-    // To keep it generic, we let caller pass bytes via st->* increments.
-    // (See wrappers below.)
 }
 
 static __always_inline void account_ipv4(__u32 ip, __u8 proto,
@@ -150,7 +135,15 @@ static __always_inline void account_ipv6(struct in6_addr *ip6, __u8 proto,
     }
 }
 
+/*
+ * handle_ipv4/6 now accept bytes_l2 which represents the full on-wire
+ * bytes for the packet (Ethernet frame length at XDP, skb->len at TC).
+ * We keep computing sport/dport and proto as before, but we pass
+ * bytes_l2 into account_* so the existing counters reflect full-frame bytes.
+ */
+
 static __always_inline int handle_ipv4(void *data, void *data_end,
+                                       __u64 bytes_l2,
                                        bool egress)
 {
     struct iphdr *iph = data;
@@ -162,18 +155,20 @@ static __always_inline int handle_ipv4(void *data, void *data_end,
     if ((void *)iph + ihl > data_end)
         return 0;
 
-    __u64 bytes = (__u64)((char *)data_end - (char *)data);
-
     __u16 sport = 0, dport = 0;
 
+    void *l4 = (void *)iph + ihl;
+    if (l4 > data_end)
+        return 0;
+
     if (proto == IPPROTO_TCP) {
-        struct tcphdr *th = (void *)iph + ihl;
+        struct tcphdr *th = l4;
         if ((void *)(th + 1) > data_end)
             return 0;
         sport = bpf_ntohs(th->source);
         dport = bpf_ntohs(th->dest);
     } else if (proto == IPPROTO_UDP) {
-        struct udphdr *uh = (void *)iph + ihl;
+        struct udphdr *uh = l4;
         if ((void *)(uh + 1) > data_end)
             return 0;
         sport = bpf_ntohs(uh->source);
@@ -188,7 +183,8 @@ static __always_inline int handle_ipv4(void *data, void *data_end,
     // For ingress: client is src, for egress: client is dst
     __u32 client = egress ? dst : src;
 
-    account_ipv4(client, proto, sport, dport, bytes, egress);
+    // Use bytes_l2 (full on-wire bytes) as the metric stored in the existing counters.
+    account_ipv4(client, proto, sport, dport, bytes_l2, egress);
 
     if (egress) {
         __u32 key0 = 0, key1 = 1;
@@ -200,6 +196,7 @@ static __always_inline int handle_ipv4(void *data, void *data_end,
 }
 
 static __always_inline int handle_ipv6(void *data, void *data_end,
+                                       __u64 bytes_l2,
                                        bool egress)
 {
     struct ipv6hdr *ip6h = data;
@@ -208,8 +205,8 @@ static __always_inline int handle_ipv6(void *data, void *data_end,
 
     __u8 proto = ip6h->nexthdr;
     void *l4 = ip6h + 1;
-
-    __u64 bytes = (__u64)((char *)data_end - (char *)data);
+    if (l4 > data_end)
+        return 0;
 
     __u16 sport = 0, dport = 0;
 
@@ -234,7 +231,8 @@ static __always_inline int handle_ipv6(void *data, void *data_end,
 
     struct in6_addr client = egress ? dst : src;
 
-    account_ipv6(&client, proto, sport, dport, bytes, egress);
+    // Use bytes_l2 (full on-wire bytes) as the metric stored in the existing counters.
+    account_ipv6(&client, proto, sport, dport, bytes_l2, egress);
 
     return 0;
 }
@@ -249,13 +247,16 @@ int xdp_ingress(struct xdp_md *ctx)
     if ((void *)(eth + 1) > data_end)
         return XDP_PASS;
 
+    // Full on-wire bytes from Ethernet header to end of packet
+    __u64 bytes_l2 = (__u64)((char *)data_end - (char *)data);
+
     __u16 h_proto = bpf_ntohs(eth->h_proto);
     void *nh = eth + 1;
 
     if (h_proto == ETH_P_IP) {
-        handle_ipv4(nh, data_end, false);
+        handle_ipv4(nh, data_end, bytes_l2, false);
     } else if (h_proto == ETH_P_IPV6) {
-        handle_ipv6(nh, data_end, false);
+        handle_ipv6(nh, data_end, bytes_l2, false);
     }
 
     return XDP_PASS;
@@ -271,13 +272,16 @@ int tc_egress(struct __sk_buff *skb)
     if ((void *)(eth + 1) > data_end)
         return BPF_OK;
 
+    // Use skb->len as the best approximation of full on-wire bytes at TC
+    __u64 bytes_l2 = skb->len;
+
     __u16 h_proto = bpf_ntohs(eth->h_proto);
     void *nh = eth + 1;
 
     if (h_proto == ETH_P_IP) {
-        handle_ipv4(nh, data_end, true);
+        handle_ipv4(nh, data_end, bytes_l2, true);
     } else if (h_proto == ETH_P_IPV6) {
-        handle_ipv6(nh, data_end, true);
+        handle_ipv6(nh, data_end, bytes_l2, true);
     }
 
     return BPF_OK;

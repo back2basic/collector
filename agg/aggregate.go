@@ -1,284 +1,173 @@
 package agg
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
+	"net"
 	"os"
 	"time"
 
 	"github.com/back2basic/collector/bpfgo"
 	"github.com/back2basic/collector/dns"
-	"github.com/back2basic/collector/model"
 	"github.com/back2basic/collector/storage"
-
-	"github.com/cilium/ebpf"
 )
 
-func openPinned(path string) *ebpf.Map {
-	m, err := ebpf.LoadPinnedMap(path, nil)
-	if err != nil {
-		return nil
-	}
-	return m
+// Aggregator persists live counters into SQLite and then resets them.
+type Aggregator struct {
+	h  *bpfgo.Handles
+	db *sql.DB
 }
 
-func Run(h *bpfgo.Handles, flushInterval time.Duration, appwriteInterval time.Duration) {
-	hostname := os.Getenv("SIA_HOSTNAME")
-	if hostname == "" {
-		log.Fatalln("SIA_HOSTNAME is not set")
-	}
+func New(h *bpfgo.Handles, db *sql.DB) *Aggregator {
+	return &Aggregator{h: h, db: db}
+}
 
+// FlushOnce performs a single synchronous flush of current counters to the DB.
+func (a *Aggregator) FlushOnce() {
+	// call the same internal flush implementation used by the ticker
+	a.flush()
+}
+
+func (a *Aggregator) Run(flushInterval time.Duration, exteralFlushInterval time.Duration) {
 	flushTicker := time.NewTicker(flushInterval)
-	// appwriteTimer := alignedTicker(appwriteInterval)
+	defer flushTicker.Stop()
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Printf("aggregator: get hostname: %v", err)
+	}
+	extTimer := alignedTicker(exteralFlushInterval)
 
-	// var appwriteTicker *time.Ticker
-
+	var extTicker *time.Ticker
 	for {
 		select {
 		case <-flushTicker.C:
-			flushToSQLite(hostname)
+			a.flush()
 
-		// case <-appwriteTimer.C:
-		// 	pushDailyToAppwrite(hostname)
-		// 	appwriteTicker = time.NewTicker(appwriteInterval)
+		case <-extTimer.C:
+            bpfgo.CleanupZeroEntriesUsingHandles(a.h.IP4Stats, a.h.IP6Stats)
+			pushDailyToAppwrite(hostname)
+			extTicker = time.NewTicker(exteralFlushInterval)
 
-		// case <-func() <-chan time.Time { 
-		// 	if appwriteTicker != nil { 
-		// 		return appwriteTicker.C 
-		// 		} 
-		// 		return nil 
-		// 		}():
-		// 		 pushDailyToAppwrite(hostname)
+		case <-func() <-chan time.Time {
+			if extTicker != nil {
+				return extTicker.C
+			}
+			return nil
+		}():
+            bpfgo.CleanupZeroEntriesUsingHandles(a.h.IP4Stats, a.h.IP6Stats)
+			pushDailyToAppwrite(hostname)
 		}
 	}
 }
 
-func flushToSQLite(hostname string) {
-	now := time.Now().Unix()
+func (a *Aggregator) flush() {
+	now := time.Now().UTC().Truncate(time.Minute)
 
-	var rec4 []model.TrafficRecord4
-	var rec6 []model.TrafficRecord6
-
-	// -------- IPv4 UP --------
-	if m := openPinned(bpfgo.PinIP4Up); m != nil {
-		iter := m.Iterate()
-		var key uint32
-		var val bpfgo.SiaIPStats
-
-		for iter.Next(&key, &val) {
-			ip := bpfgo.IntToIP4(key)
-			name := dns.Resolve(ip)
-
-			// skip if value are 0
-			if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
-				continue
-			}
-
-			rec4 = append(rec4, model.TrafficRecord4{
-				Key:         key,
-				IP:          ip.String(),
-				DNS:         name,
-				Up9981:      val.Up9981,
-				Down9981:    0,
-				Up9984TCP:   val.Up9984TCP,
-				Down9984TCP: 0,
-				Up9984UDP:   val.Up9984UDP,
-				Down9984UDP: 0,
-				Timestamp:   now,
-			})
-		}
-		m.Close()
-	}
-
-	// -------- IPv4 DOWN --------
-	if m := openPinned(bpfgo.PinIP4Down); m != nil {
-		iter := m.Iterate()
-		var key uint32
-		var val bpfgo.SiaIPStats
-
-		for iter.Next(&key, &val) {
-			ip := bpfgo.IntToIP4(key)
-			name := dns.Resolve(ip)
-
-			// skip if value are 0
-			if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
-				continue
-			}
-
-			rec4 = append(rec4, model.TrafficRecord4{
-				Key:         key,
-				IP:          ip.String(),
-				DNS:         name,
-				Up9981:      0,
-				Down9981:    val.Down9981,
-				Up9984TCP:   0,
-				Down9984TCP: val.Down9984TCP,
-				Up9984UDP:   0,
-				Down9984UDP: val.Down9984UDP,
-				Timestamp:   now,
-			})
-		}
-		m.Close()
-	}
-
-	// -------- IPv6 UP --------
-	if m := openPinned(bpfgo.PinIP6Up); m != nil {
-		iter := m.Iterate()
-		var key [16]byte
-		var val bpfgo.SiaIPStats
-
-		for iter.Next(&key, &val) {
-			ip := bpfgo.IPv6FromKey(key)
-			name := dns.Resolve(ip)
-
-			// skip if value are 0
-			if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
-				continue
-			}
-
-			rec6 = append(rec6, model.TrafficRecord6{
-				Key:         key,
-				IP:          ip.String(),
-				DNS:         name,
-				Up9981:      val.Up9981,
-				Down9981:    0,
-				Up9984TCP:   val.Up9984TCP,
-				Down9984TCP: 0,
-				Up9984UDP:   val.Up9984UDP,
-				Down9984UDP: 0,
-				Timestamp:   now,
-			})
-		}
-		m.Close()
-	}
-
-	// -------- IPv6 DOWN --------
-	if m := openPinned(bpfgo.PinIP6Down); m != nil {
-		iter := m.Iterate()
-		var key [16]byte
-		var val bpfgo.SiaIPStats
-
-		for iter.Next(&key, &val) {
-			ip := bpfgo.IPv6FromKey(key)
-			name := dns.Resolve(ip)
-
-			// skip if value are 0
-			if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
-				continue
-			}
-
-			rec6 = append(rec6, model.TrafficRecord6{
-				Key:         key,
-				IP:          ip.String(),
-				DNS:         name,
-				Up9981:      0,
-				Down9981:    val.Down9981,
-				Up9984TCP:   0,
-				Down9984TCP: val.Down9984TCP,
-				Up9984UDP:   0,
-				Down9984UDP: val.Down9984UDP,
-				Timestamp:   now,
-			})
-		}
-		m.Close()
-	}
-
-	// Nothing to flush
-	if len(rec4)+len(rec6) == 0 {
+	tx, err := a.db.Begin()
+	if err != nil {
+		fmt.Println("agg: begin tx:", err)
 		return
 	}
 
-	log.Printf("AGG: flushing %d IPv4 + %d IPv6 rows to SQLite", len(rec4), len(rec6))
-
-	// Write to SQLite
-	if err := storage.FlushSQLite(hostname, rec4, rec6); err != nil {
-		log.Printf("AGG: SQLite flush error: %v", err)
+	stmt, err := tx.Prepare(`
+        INSERT INTO traffic (
+            timestamp,
+            ip,
+            dns,
+            consensus_up,
+            consensus_down,
+            siamux_up,
+            siamux_down,
+            quic_up,
+            quic_down
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+	if err != nil {
+		fmt.Println("agg: prepare:", err)
+		_ = tx.Rollback()
 		return
 	}
+	defer stmt.Close()
 
-	// Reset all maps after successful flush
-	resetAllMaps(rec4, rec6)
-}
-
-func resetAllMaps(rec4 []model.TrafficRecord4, rec6 []model.TrafficRecord6) {
-	zero := bpfgo.SiaIPStats{}
-
-	// IPv4 UP
-	if m := openPinned(bpfgo.PinIP4Up); m != nil {
-		for _, r := range rec4 {
-			_ = m.Update(&r.Key, &zero, ebpf.UpdateAny)
-		}
-		m.Close()
-	}
-
-	// IPv4 DOWN
-	if m := openPinned(bpfgo.PinIP4Down); m != nil {
-		for _, r := range rec4 {
-			_ = m.Update(&r.Key, &zero, ebpf.UpdateAny)
-		}
-		m.Close()
-	}
-
-	// IPv6 UP
-	if m := openPinned(bpfgo.PinIP6Up); m != nil {
-		for _, r := range rec6 {
-			_ = m.Update(&r.Key, &zero, ebpf.UpdateAny)
-		}
-		m.Close()
-	}
-
-	// IPv6 DOWN
-	if m := openPinned(bpfgo.PinIP6Down); m != nil {
-		for _, r := range rec6 {
-			_ = m.Update(&r.Key, &zero, ebpf.UpdateAny)
-		}
-		m.Close()
-	}
-}
-
-func resetBPFMaps(rec4 []model.TrafficRecord4, rec6 []model.TrafficRecord6) {
 	// IPv4
-	if m4 := openPinned(bpfgo.PinIP4Up); m4 != nil {
-		for _, r := range rec4 {
-			zero := bpfgo.SiaIPStats{}
-			_ = m4.Update(&r.Key, &zero, ebpf.UpdateAny)
+	iter := a.h.IP4Stats.Iterate()
+	var ip uint32
+	var st bpfgo.SiaIPStats
 
-			if isZeroStats(r) {
-				_ = m4.Delete(&r.Key)
-			}
+	for iter.Next(&ip, &st) {
+		if st.ConsensusDown == 0 &&
+			st.ConsensusUp == 0 &&
+			st.SiamuxDown == 0 &&
+			st.SiamuxUp == 0 &&
+			st.QuicDown == 0 &&
+			st.QuicUp == 0 {
+			continue
 		}
-		m4.Close()
+		ipStr := fmt.Sprintf("%d.%d.%d.%d",
+			byte(ip), byte(ip>>8), byte(ip>>16), byte(ip>>24))
+
+		// Use existing dns.Resolve which has its own cache and TTL
+		dnsName := dns.Resolve(net.ParseIP(ipStr))
+
+		_, err := stmt.Exec(
+			now.Unix(),
+			ipStr,
+			dnsName,
+			st.ConsensusUp,
+			st.ConsensusDown,
+			st.SiamuxUp,
+			st.SiamuxDown,
+			st.QuicUp,
+			st.QuicDown,
+		)
+		if err != nil {
+			fmt.Println("agg: insert ipv4:", err)
+		}
 	}
 
 	// IPv6
-	if m6 := openPinned(bpfgo.PinIP6Up); m6 != nil {
-		for _, r := range rec6 {
-			zero := bpfgo.SiaIPStats{}
-			_ = m6.Update(&r.Key, &zero, ebpf.UpdateAny)
+	iter6 := a.h.IP6Stats.Iterate()
+	var ip6 [16]byte
+	var st6 bpfgo.SiaIPStats
 
-			if isZeroStats6(r) {
-				_ = m6.Delete(&r.Key)
-			}
+	for iter6.Next(&ip6, &st6) {
+		if st6.ConsensusDown == 0 &&
+			st6.ConsensusUp == 0 &&
+			st6.SiamuxDown == 0 &&
+			st6.SiamuxUp == 0 &&
+			st6.QuicDown == 0 &&
+			st6.QuicUp == 0 {
+			continue
 		}
-		m6.Close()
+		ipStr := net.IP(ip6[:]).String()
+
+		dnsName := dns.Resolve(net.ParseIP(ipStr))
+
+		_, err := stmt.Exec(
+			now.Unix(),
+			ipStr,
+			dnsName,
+			st6.ConsensusUp,
+			st6.ConsensusDown,
+			st6.SiamuxUp,
+			st6.SiamuxDown,
+			st6.QuicUp,
+			st6.QuicDown,
+		)
+		if err != nil {
+			fmt.Println("agg: insert ipv6:", err)
+		}
 	}
-}
 
-func isZeroStats(r model.TrafficRecord4) bool {
-	return r.Up9981 == 0 &&
-		r.Down9981 == 0 &&
-		r.Up9984TCP == 0 &&
-		r.Down9984TCP == 0 &&
-		r.Up9984UDP == 0 &&
-		r.Down9984UDP == 0
-}
+	if err := tx.Commit(); err != nil {
+		fmt.Println("agg: commit:", err)
+	}
 
-func isZeroStats6(r model.TrafficRecord6) bool {
-	return r.Up9981 == 0 &&
-		r.Down9981 == 0 &&
-		r.Up9984TCP == 0 &&
-		r.Down9984TCP == 0 &&
-		r.Up9984UDP == 0 &&
-		r.Down9984UDP == 0
+	// Persisted, now reset live counters
+	if err := bpfgo.ResetCountersUsingHandles(a.h.IP4Stats, a.h.IP6Stats); err != nil {
+		log.Printf("reset counters: %v", err)
+	}
 }
 
 func pushDailyToAppwrite(hostname string) {
@@ -298,7 +187,7 @@ func pushDailyToAppwrite(hostname string) {
 }
 
 func alignedTicker(d time.Duration) *time.Timer {
-    now := time.Now()
-    next := now.Truncate(d).Add(d)
-    return time.NewTimer(next.Sub(now))
+	now := time.Now()
+	next := now.Truncate(d).Add(d)
+	return time.NewTimer(next.Sub(now))
 }

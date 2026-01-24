@@ -1,166 +1,148 @@
 package live
 
 import (
-	"fmt"
-	"log"
-	"time"
+    "fmt"
+    "net"
+    "time"
 
-	"github.com/back2basic/collector/bpfgo"
-
-	"github.com/cilium/ebpf"
+    "github.com/back2basic/collector/bpfgo"
+    "github.com/back2basic/collector/model"
+    "github.com/back2basic/collector/storage"
 )
 
-func openPinned(path string) *ebpf.Map {
-	m, err := ebpf.LoadPinnedMap(path, nil)
-	if err != nil {
-		return nil
-	}
-	return m
+type Live struct {
+    h *bpfgo.Handles
 }
 
-func dumpDown4() {
-	m := openPinned(bpfgo.PinIP4Down)
-	if m == nil {
-		return
-	}
-	defer m.Close()
+func New(h *bpfgo.Handles) *Live {
+    return &Live{h: h}
+}
 
-	it := m.Iterate()
-	var key uint32
-	var val bpfgo.SiaIPStats
+func (l *Live) Run() {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
 
-	for it.Next(&key, &val) {
-		ip := bpfgo.IntToIP4(key)
-        // skip if value are 0
-        if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
+    for {
+        <-ticker.C
+        l.printStats()
+    }
+}
+
+func (l *Live) printStats() {
+    // Live section: current BPF map contents
+    fmt.Println("---- LIVE TRAFFIC (semantic counters) ----")
+
+    // IPv4 live
+    iter := l.h.IP4Stats.Iterate()
+    var ip uint32
+    var st bpfgo.SiaIPStats
+
+    for iter.Next(&ip, &st) {
+        if st.ConsensusDown == 0 &&
+            st.ConsensusUp == 0 &&
+            st.SiamuxDown == 0 &&
+            st.SiamuxUp == 0 &&
+            st.QuicDown == 0 &&
+            st.QuicUp == 0 {
             continue
         }
-		fmt.Printf("DOWN4: ip=%s  down_9981=%d  down_9984_tcp=%d  down_9984_udp=%d\n",
-			ip, val.Down9981, val.Down9984TCP, val.Down9984UDP)
-	}
-}
+        addr := net.IPv4(byte(ip), byte(ip>>8), byte(ip>>16), byte(ip>>24))
+        fmt.Printf("IPv4 %s  consensus(down/up)=%s/%s  siamux(down/up)=%s/%s  quic(down/up)=%s/%s\n",
+            addr.String(),
+            bytesHuman(st.ConsensusDown), bytesHuman(st.ConsensusUp),
+            bytesHuman(st.SiamuxDown), bytesHuman(st.SiamuxUp),
+            bytesHuman(st.QuicDown),bytesHuman(st.QuicUp),
+        )
+    }
 
-func dumpUp4() {
-	m := openPinned(bpfgo.PinIP4Up)
-	if m == nil {
-		return
-	}
-	defer m.Close()
+    // IPv6 live
+    iter6 := l.h.IP6Stats.Iterate()
+    var ip6 net.IP
+    var st6 bpfgo.SiaIPStats
 
-	it := m.Iterate()
-	var key uint32
-	var val bpfgo.SiaIPStats
-
-	for it.Next(&key, &val) {
-		ip := bpfgo.IntToIP4(key)
-        // skip if value are 0
-        if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
+    for iter6.Next(&ip6, &st6) {
+        if st6.ConsensusDown == 0 &&
+            st6.ConsensusUp == 0 &&
+            st6.SiamuxDown == 0 &&
+            st6.SiamuxUp == 0 &&
+            st6.QuicDown == 0 &&
+            st6.QuicUp == 0 {
             continue
         }
-		fmt.Printf("UP4:   ip=%s  up_9981=%d  up_9984_tcp=%d  up_9984_udp=%d\n",
-			ip, val.Up9981, val.Up9984TCP, val.Up9984UDP)
-	}
-}
+        fmt.Printf("IPv6 %s  consensus(down/up)=%s/%s  siamux(down/up)=%s/%s  quic(down/up)=%s/%s\n",
+            ip6.String(),
+            bytesHuman(st6.ConsensusDown), bytesHuman(st6.ConsensusUp),
+            bytesHuman(st6.SiamuxDown), bytesHuman(st6.SiamuxUp),
+            bytesHuman(st6.QuicDown), bytesHuman(st6.QuicUp),
+        )
+    }
 
-func dumpDown6() {
-	m := openPinned(bpfgo.PinIP6Down)
-	if m == nil {
-		return
-	}
-	defer m.Close()
+    fmt.Println("-------------------------------------------")
 
-	it := m.Iterate()
-	var key [16]byte
-	var val bpfgo.SiaIPStats
+    // Stored / aggregated section: use existing storage.QueryDailyTotals()
+    fmt.Println("---- STORED TRAFFIC (aggregated today) ----")
 
-	for it.Next(&key, &val) {
-		ip := bpfgo.IPv6FromKey(key)
-        // skip if value are 0
-        if val.Down9981 == 0 && val.Down9984TCP == 0 && val.Down9984UDP == 0 {
+    aggMap := make(map[string]model.AggregatedRecord)
+    if recs, err := storage.QueryDailyTotals(); err == nil {
+        for _, r := range recs {
+            aggMap[r.IP] = r
+        }
+    } else {
+        fmt.Printf("WARNING: failed to load aggregated totals: %v\n", err)
+    }
+
+    // Print stored entries
+    for ipStr, agg := range aggMap {
+        parsed := net.ParseIP(ipStr)
+        if parsed == nil {
+            fmt.Printf("%s  consensus(down/up)=%s/%s  siamux(down/up)=%s/%s  quic(down/up)=%s/%s\n",
+                ipStr,
+                bytesHuman(agg.ConsensusDown), bytesHuman(agg.ConsensusUp),
+                bytesHuman(agg.SiamuxDown), bytesHuman(agg.SiamuxUp),
+                bytesHuman(agg.QuicDown), bytesHuman(agg.QuicUp),
+            )
             continue
         }
-		fmt.Printf("DOWN6: ip=%s  down_9981=%d  down_9984_tcp=%d  down_9984_udp=%d\n",
-			ip, val.Down9981, val.Down9984TCP, val.Down9984UDP)
-	}
-}
-
-func dumpUp6() {
-	m := openPinned(bpfgo.PinIP6Up)
-	if m == nil {
-		return
-	}
-	defer m.Close()
-
-	it := m.Iterate()
-	var key [16]byte
-	var val bpfgo.SiaIPStats
-
-	for it.Next(&key, &val) {
-		ip := bpfgo.IPv6FromKey(key)
-        // skip if value are 0
-        if val.Up9981 == 0 && val.Up9984TCP == 0 && val.Up9984UDP == 0 {
-            continue
+        if parsed.To4() != nil {
+            fmt.Printf("IPv4 %s  consensus(down/up)=%s/%s  siamux(down/up)=%s/%s  quic(down/up)=%s/%s\n",
+                ipStr,
+                bytesHuman(agg.ConsensusDown), bytesHuman(agg.ConsensusUp),
+                bytesHuman(agg.SiamuxDown), bytesHuman(agg.SiamuxUp),
+                bytesHuman(agg.QuicDown), bytesHuman(agg.QuicUp),
+            )
+        } else {
+            fmt.Printf("IPv6 %s  consensus(down/up)=%s/%s  siamux(down/up)=%s/%s  quic(down/up)=%s/%s\n",
+                ipStr,
+                bytesHuman(agg.ConsensusDown), bytesHuman(agg.ConsensusUp),
+                bytesHuman(agg.SiamuxDown), bytesHuman(agg.SiamuxUp),
+                bytesHuman(agg.QuicDown), bytesHuman(agg.QuicUp),
+            )
         }
-		fmt.Printf("UP6:   ip=%s  up_9981=%d  up_9984_tcp=%d  up_9984_udp=%d\n",
-			ip, val.Up9981, val.Up9984TCP, val.Up9984UDP)
-	}
+    }
+
+    fmt.Println("-------------------------------------------")
 }
 
-func dumpTCDebug() {
-	m := openPinned(bpfgo.PinTCDebug)
-	if m == nil {
-		return
-	}
-	defer m.Close()
+// bytesHuman converts bytes to a human readable string with units (KB/MB/GB/TB).
+// Uses 1024 base and prints with two decimals.
+func bytesHuman(b uint64) string {
+    const (
+        KB = 1024
+        MB = KB * 1024
+        GB = MB * 1024
+        TB = GB * 1024
+    )
 
-	for i := 0; i < 32; i++ {
-		key := uint32(i)
-		var val uint64
-		if err := m.Lookup(&key, &val); err == nil && val > 0 {
-			log.Printf("TCDBG[%d] = %d", i, val)
-		}
-	}
-}
-
-func dumpTCLastIP() {
-	m := openPinned(bpfgo.PinTCLastIP)
-	if m == nil {
-		return
-	}
-	defer m.Close()
-
-	for i := 0; i < 2; i++ {
-		key := uint32(i)
-		var val uint32
-		if err := m.Lookup(&key, &val); err == nil {
-			ip := bpfgo.IntToIP4(val)
-			log.Printf("TC_LAST_IP[%d] = %s", i, ip)
-		}
-	}
-}
-
-func Run(h *bpfgo.Handles, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		fmt.Println("---- DOWN (XDP ingress) ----")
-		dumpDown4()
-		dumpDown6()
-
-		fmt.Println("---- UP (TC egress) --------")
-		dumpUp4()
-		dumpUp6()
-
-		fmt.Println("---------- DEBUG -----------")
-		dumpTCDebug()
-		dumpTCLastIP()
-
-		fmt.Println("-----------------------------")
-
-		// if doReset {
-		//     bpfgo.ResetCounters()
-		//     bpfgo.CleanupZeroEntries()
-		// }
-	}
+    switch {
+    case b >= TB:
+        return fmt.Sprintf("%.2f TB", float64(b)/float64(TB))
+    case b >= GB:
+        return fmt.Sprintf("%.2f GB", float64(b)/float64(GB))
+    case b >= MB:
+        return fmt.Sprintf("%.2f MB", float64(b)/float64(MB))
+    case b >= KB:
+        return fmt.Sprintf("%.2f KB", float64(b)/float64(KB))
+    default:
+        return fmt.Sprintf("%d B", b)
+    }
 }

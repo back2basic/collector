@@ -74,12 +74,12 @@ func PushDailyToAppwrite(hostname string, rows []model.AggregatedRecord) error {
 		rowID := makeRowID(hostname, r.IP, day)
 
 		// skip if value are 0
-		if r.Up9981 == 0 &&
-			r.Down9981 == 0 &&
-			r.Up9984TCP == 0 &&
-			r.Down9984TCP == 0 &&
-			r.Up9984UDP == 0 &&
-			r.Down9984UDP == 0 {
+		if r.ConsensusUp == 0 &&
+			r.ConsensusDown == 0 &&
+			r.SiamuxUp == 0 &&
+			r.SiamuxDown == 0 &&
+			r.QuicUp == 0 &&
+			r.QuicDown == 0 {
 			continue
 		}
 
@@ -88,12 +88,12 @@ func PushDailyToAppwrite(hostname string, rows []model.AggregatedRecord) error {
 			"ip":            r.IP,
 			"dns":           r.DNS,
 			"day":           day,
-			"up_9981":       r.Up9981,
-			"down_9981":     r.Down9981,
-			"up_9984_tcp":   r.Up9984TCP,
-			"down_9984_tcp": r.Down9984TCP,
-			"up_9984_udp":   r.Up9984UDP,
-			"down_9984_udp": r.Down9984UDP,
+			"up_9981":       r.ConsensusUp,
+			"down_9981":     r.ConsensusDown,
+			"up_9984_tcp":   r.SiamuxUp,
+			"down_9984_tcp": r.SiamuxDown,
+			"up_9984_udp":   r.QuicUp,
+			"down_9984_udp": r.QuicDown,
 			// "updated_at":    time.Now().Unix(),
 		}
 

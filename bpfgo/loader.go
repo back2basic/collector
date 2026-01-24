@@ -1,199 +1,190 @@
 package bpfgo
 
 import (
-    "encoding/binary"
-    "fmt"
-    "log"
-    "net"
-    "os"
-    "syscall"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"unsafe"
 
-    "github.com/cilium/ebpf"
-    "github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 )
 
 const (
-    bpfObjPath = "bpf/sia_bpfel.o"
-    bpfFsMount = "/sys/fs/bpf"
+	// bpfObjPath = "./bpf/sia_bpfel.o"
+	bpfObjPath = "/var/lib/collector/bpf/sia_bpfel.o"
 
-    PinHostIPv4 = "/sys/fs/bpf/host_ipv4"
-    PinHostIPv6 = "/sys/fs/bpf/host_ipv6"
-    PinTCDebug  = "/sys/fs/bpf/tc_debug"
-    PinTCLastIP = "/sys/fs/bpf/tc_last_ip"
-
-    PinIP4Down = "/sys/fs/bpf/ip4_bytes_down"
-    PinIP4Up   = "/sys/fs/bpf/ip4_bytes_up"
-    PinIP6Down = "/sys/fs/bpf/ip6_bytes_down"
-    PinIP6Up   = "/sys/fs/bpf/ip6_bytes_up"
-
-    progXDP      = "xdp_prog"
-    progTCEgress = "tc_egress"
+	PORT_CONSENSUS = 1
+	PORT_SIAMUX    = 2
+	PORT_QUIC      = 3
 )
 
 type Handles struct {
-    Coll    *ebpf.Collection
-    XDPLink link.Link
-    TCLink  link.Link
-}
-
-func (h *Handles) Close() {
-    if h.XDPLink != nil {
-        _ = h.XDPLink.Close()
-    }
-    if h.TCLink != nil {
-        _ = h.TCLink.Close()
-    }
-    if h.Coll != nil {
-        h.Coll.Close()
-    }
-    UnloadPinned()
-}
-
-func ensureBPFFS() {
-    if fi, err := os.Stat(bpfFsMount); err != nil || !fi.IsDir() {
-        _ = os.MkdirAll(bpfFsMount, 0755)
-    }
-    _ = syscall.Mount("bpf", bpfFsMount, "bpf", 0, "")
-}
-
-func ifaceIndex(name string) int {
-    ifi, err := net.InterfaceByName(name)
-    if err != nil {
-        log.Fatalf("get interface %s: %v", name, err)
-    }
-    return ifi.Index
-}
-
-func hostAddrs(iface string) (net.IP, net.IP) {
-    ifi, err := net.InterfaceByName(iface)
-    if err != nil {
-        log.Fatalf("get interface %s: %v", iface, err)
-    }
-    addrs, err := ifi.Addrs()
-    if err != nil {
-        log.Fatalf("get addrs for %s: %v", iface, err)
-    }
-
-    var v4, v6 net.IP
-    for _, a := range addrs {
-        if ipnet, ok := a.(*net.IPNet); ok {
-            ip := ipnet.IP
-            if ip4 := ip.To4(); ip4 != nil {
-                v4 = ip4
-            } else if ip6 := ip.To16(); ip6 != nil {
-                v6 = ip6
-            }
-        }
-    }
-    return v4, v6
-}
-
-func ip4ToU32(ip net.IP) uint32 {
-    return binary.BigEndian.Uint32(ip.To4())
+	Coll      *ebpf.Collection
+	IP4Stats  *ebpf.Map
+	IP6Stats  *ebpf.Map
+	TCLastIP4 *ebpf.Map
+	XDPLink   link.Link
+	TCLink    link.Link
 }
 
 func Load(iface string) (*Handles, error) {
-    ensureBPFFS()
+	spec, err := ebpf.LoadCollectionSpec(bpfObjPath)
+	if err != nil {
+		return nil, fmt.Errorf("load BPF spec: %w", err)
+	}
 
-    spec, err := ebpf.LoadCollectionSpec(bpfObjPath)
-    if err != nil {
-        return nil, fmt.Errorf("load BPF spec: %w", err)
-    }
+	coll, err := ebpf.NewCollection(spec)
+	if err != nil {
+		return nil, fmt.Errorf("new collection: %w", err)
+	}
 
-    coll, err := ebpf.NewCollection(spec)
-    if err != nil {
-        return nil, fmt.Errorf("new collection: %w", err)
-    }
+	h := &Handles{Coll: coll}
 
-    xdpProg := coll.Programs[progXDP]
-    tcProg := coll.Programs[progTCEgress]
-    if xdpProg == nil || tcProg == nil {
-        coll.Close()
-        return nil, fmt.Errorf("missing XDP or TC program")
-    }
+	// Resolve maps
+	ip4Stats, ok := coll.Maps["ip4_stats"]
+	if !ok {
+		return nil, fmt.Errorf("missing map ip4_stats")
+	}
+	h.IP4Stats = ip4Stats
 
-    ifIndex := ifaceIndex(iface)
+	ip6Stats, ok := coll.Maps["ip6_stats"]
+	if !ok {
+		return nil, fmt.Errorf("missing map ip6_stats")
+	}
+	h.IP6Stats = ip6Stats
 
-    xdpLink, err := link.AttachXDP(link.XDPOptions{
-        Program:   xdpProg,
-        Interface: ifIndex,
-        Flags:     link.XDPGenericMode,
-    })
-    if err != nil {
-        coll.Close()
-        return nil, fmt.Errorf("attach XDP: %w", err)
-    }
+	tcLast, ok := coll.Maps["tc_last_ip4"]
+	if !ok {
+		return nil, fmt.Errorf("missing map tc_last_ip4")
+	}
+	h.TCLastIP4 = tcLast
 
-    tcLink, err := link.AttachTCX(link.TCXOptions{
-        Program:   tcProg,
-        Interface: ifIndex,
-        Attach:    ebpf.AttachTCXEgress,
-    })
-    if err != nil {
-        xdpLink.Close()
-        coll.Close()
-        return nil, fmt.Errorf("attach TC: %w", err)
-    }
+	// Load ports from env into port_config
+	if err := loadPorts(coll); err != nil {
+		return nil, fmt.Errorf("loadPorts: %w", err)
+	}
 
-    maps := map[string]string{
-        "ip4_bytes_down": PinIP4Down,
-        "ip4_bytes_up":   PinIP4Up,
-        "ip6_bytes_down": PinIP6Down,
-        "ip6_bytes_up":   PinIP6Up,
-        "host_ipv4":      PinHostIPv4,
-        "host_ipv6":      PinHostIPv6,
-        "tc_debug":       PinTCDebug,
-        "tc_last_ip":     PinTCLastIP,
-    }
-    for name, path := range maps {
-        m := coll.Maps[name]
-        if m == nil {
-            xdpLink.Close()
-            tcLink.Close()
-            coll.Close()
-            return nil, fmt.Errorf("missing map %s", name)
-        }
-        if err := m.Pin(path); err != nil {
-            xdpLink.Close()
-            tcLink.Close()
-            coll.Close()
-            return nil, fmt.Errorf("pin %s: %w", name, err)
-        }
-    }
+	// Attach XDP + TC
+	if err := attachPrograms(h, iface); err != nil {
+		h.Close()
+		return nil, err
+	}
 
-    host4, host6 := hostAddrs(iface)
-    if host4 != nil {
-        val := ip4ToU32(host4)
-        key := uint32(0)
-        if err := coll.Maps["host_ipv4"].Put(&key, &val); err != nil {
-            log.Fatalf("write host_ipv4: %v", err)
-        }
-        log.Printf("host IPv4: %s", host4.String())
-    }
-    if host6 != nil {
-        key := uint32(0)
-        var v [16]byte
-        copy(v[:], host6.To16())
-        if err := coll.Maps["host_ipv6"].Put(&key, &v); err != nil {
-            log.Fatalf("write host_ipv6: %v", err)
-        }
-        log.Printf("host IPv6: %s", host6.String())
-    }
-
-    log.Printf("BPF loaded on %s", iface)
-
-    return &Handles{
-        Coll:    coll,
-        XDPLink: xdpLink,
-        TCLink:  tcLink,
-    }, nil
+	return h, nil
 }
 
-func UnloadPinned() {
-    for _, p := range []string{
-        PinHostIPv4, PinHostIPv6, PinTCDebug, PinTCLastIP,
-        PinIP4Down, PinIP4Up, PinIP6Down, PinIP6Up,
-    } {
-        _ = os.Remove(p)
-    }
+func loadPorts(coll *ebpf.Collection) error {
+	portMap, ok := coll.Maps["port_config"]
+	if !ok {
+		return fmt.Errorf("port_config map not found in BPF object")
+	}
+
+	type entry struct {
+		key uint32
+		env string
+	}
+
+	ports := []entry{
+		{PORT_CONSENSUS, "PORT_SIA_CONSENSUS"},
+		{PORT_SIAMUX, "PORT_RHP4_SIAMUX"},
+		{PORT_QUIC, "PORT_RHP4_QUIC"},
+	}
+
+	for _, p := range ports {
+		val := os.Getenv(p.env)
+		if val == "" {
+			continue
+		}
+
+		port, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %v", p.env, err)
+		}
+
+		k := uint32(p.key)
+		v := uint16(port)
+
+		if err := portMap.Put(unsafe.Pointer(&k), unsafe.Pointer(&v)); err != nil {
+			return fmt.Errorf("failed to write %s to port_config: %v", p.env, err)
+		}
+		fmt.Printf("Loaded port %d for %s into port_config map\n", port, p.env)
+	}
+
+	return nil
+}
+
+func attachPrograms(h *Handles, iface string) error {
+	ifaceObj, err := net.InterfaceByName(iface)
+	if err != nil {
+		return fmt.Errorf("lookup iface %s: %w", iface, err)
+	}
+
+	xdpProg, ok := h.Coll.Programs["xdp_ingress"]
+	if !ok {
+		return fmt.Errorf("missing XDP program xdp_ingress")
+	}
+
+	tcProg, ok := h.Coll.Programs["tc_egress"]
+	if !ok {
+		return fmt.Errorf("missing TC program tc_egress")
+	}
+
+	xdpLink, err := link.AttachXDP(link.XDPOptions{
+		Program:   xdpProg,
+		Interface: ifaceObj.Index,
+		Flags:     link.XDPGenericMode,
+	})
+	if err != nil {
+		return fmt.Errorf("attach XDP: %w", err)
+	}
+	h.XDPLink = xdpLink
+
+	// Attach TC egress
+	if err := ensureTCHook(iface); err != nil {
+		return fmt.Errorf("ensure tc hook: %w", err)
+	}
+
+	tcLink, err := link.AttachTCX(link.TCXOptions{
+		Program:   tcProg,
+		Interface: ifaceObj.Index,
+		Attach:    ebpf.AttachTCXEgress,
+	})
+	if err != nil {
+		return fmt.Errorf("attach TC: %w", err)
+	}
+	h.TCLink = tcLink
+
+	return nil
+}
+
+// ensureTCHook is a placeholder; if you already have tc qdisc setup logic,
+// keep that instead or wire this into your existing helper.
+func ensureTCHook(iface string) error {
+	// If you already manage qdisc via `tc qdisc add dev ...`, you can no-op here.
+	// Or you can shell out / use a netlink lib to ensure clsact exists.
+	_ = iface
+	return nil
+}
+
+func (h *Handles) Close() {
+	if h.XDPLink != nil {
+		h.XDPLink.Close()
+	}
+	if h.TCLink != nil {
+		h.TCLink.Close()
+	}
+	if h.Coll != nil {
+		h.Coll.Close()
+	}
+}
+
+// Optional helper if you want to load from a different path in dev
+func BPFPath() string {
+	if p := os.Getenv("COLLECTOR_BPF_PATH"); p != "" {
+		return p
+	}
+	return filepath.Clean(bpfObjPath)
 }

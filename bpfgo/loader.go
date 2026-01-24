@@ -110,6 +110,7 @@ func loadPorts(coll *ebpf.Collection) error {
 		if err := portMap.Put(unsafe.Pointer(&k), unsafe.Pointer(&v)); err != nil {
 			return fmt.Errorf("failed to write %s to port_config: %v", p.env, err)
 		}
+		fmt.Printf("Loaded port %d for %s into port_config map\n", port, p.env)
 	}
 
 	return nil

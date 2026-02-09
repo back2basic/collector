@@ -28,7 +28,7 @@ func init() {
 	apiKey := os.Getenv("APPWRITE_API_KEY")
 
 	if endpoint == "" || project == "" || apiKey == "" {
-		log.Println("APPWRITE: missing environment variables, Appwrite disabled, external flush disabled")
+		// log.Println("APPWRITE: missing environment variables, Appwrite disabled, external flush disabled")
 		return
 	}
 

@@ -1,37 +1,73 @@
-# Sia Collector
+# `collector` — Sia Hostd Traffic Collector (XDP + TC + Go)
 
-This is a high‑performance traffic
-accounting daemon for Sia hostd using XDP + TC eBPF.
+`collector` is a high‑performance traffic accounting daemon for Sia hostd.  
+It uses **XDP (ingress)** and **TC (egress)** eBPF programs to measure per‑client bandwidth on Sia’s ports:
 
-## 🚀 Features
-- XDP ingress + TC egress traffic accounting
-- Per‑client IPv4/IPv6 counters
-- Port classification for 9981 + 9984 (TCP/UDP)
-- SQLite aggregation (1‑minute flush)
-- DNS reverse lookup caching
-- Live dashboard (30‑second refresh)
-- Graceful shutdown with final flush + counter reset
-- Automatic bpffs mounting + map pinning
-- Systemd service
-- Installer + uninstaller scripts
+- **9981** — Consensus  
+- **9984 TCP** — RHP4 (Siamux)  
+- **9984 UDP** — RHP4 (QUIC)
 
+Traffic is tracked per client IP (IPv4 + IPv6) and flushed to SQLite every minute.
 
-# 📦 Installation
+The collector is designed for **production**, with:
+
+- Zero‑copy packet parsing in eBPF  
+- Dual‑stack IPv4/IPv6 support  
+- Per‑client counters  
+- Graceful shutdown  
+- Systemd integration  
+
+---
+
+## ✨ Features
+
+- XDP ingress accounting (DOWN traffic)  
+- TC egress accounting (UP traffic)  
+- Per‑client IPv4/IPv6 stats  
+- Port‑aware classification (9981, 9984 TCP, 9984 UDP)  
+- SQLite storage (1‑minute flush)  
+- Automatic BPF map pinning  
+- Graceful shutdown on SIGTERM  
+- Systemd service included  
+
+---
+
+## 📦 Repository Structure
+
+```
+.
+├── bpf/
+│   └── prog.c              # XDP + TC eBPF program
+├── bpfgo/
+│   └── loader.go           # BPF loader, map pinning, XDP/TC attach
+├── agg/
+│   └── aggregate.go        # SQLite aggregation + flush logic
+├── live/
+│   └── live.go             # Live in-memory dashboard
+├── collector.service       # Systemd unit
+├── Makefile
+└── main.go                 # Entry point
+```
+
+---
+
+# 🔧 Installation
 
 ## 1. Download the Release
 
-Go to:
+Download from:
 
 **`https://github.com/back2basic/collector/releases`**
 
-Download the following files from the latest release:
+You need:
 
-- `collector` (compiled Go binary)  
-- `sia_bpfel.o` (compiled eBPF program)  
-- `install.sh`  
+- `collector`  
+- `sia_bpfel.o`  
+- `install.sh` 
+- `collector.service`  
 - `uninstall.sh` (optional)
 
-Place them in the same directory before running the installer.
+Place them in the same directory.
 
 ---
 
@@ -44,15 +80,10 @@ sudo ./install.sh
 
 The installer will:
 
-- Create `/var/lib/collector/` and `/var/lib/collector/bpf/`
-- Copy:
-  - `collector` → `/usr/local/bin/collector`
-  - `sia_bpfel.o` → `/var/lib/collector/bpf/sia_bpfel.o`
+- Copy the binary to `/usr/local/bin/collector`
+- Copy the BPF object to `/var/lib/collector/bpf/sia_bpfel.o`
 - Create `/etc/collector.env` if missing
-- Install and enable the systemd service
-- Start the collector
-
-You will see progress messages for each step.
+- Install + enable + start the systemd service
 
 ---
 
@@ -64,19 +95,19 @@ Edit:
 /etc/collector.env
 ```
 
-Set the correct outgoing interface:
+Set:
 
 ```
 INTERFACE="eth0"
 ```
 
-To list your interfaces:
+Find your interface:
 
 ```bash
 ip -br link show
 ```
 
-After editing, restart the service:
+Restart:
 
 ```bash
 sudo systemctl restart collector
@@ -84,9 +115,7 @@ sudo systemctl restart collector
 
 ---
 
-## 4. Verify the Service
-
-Check logs:
+## 4. Check Logs
 
 ```bash
 journalctl -u collector -f
@@ -94,34 +123,100 @@ journalctl -u collector -f
 
 You should see:
 
-- Ports loaded into the BPF map  
+- Ports loaded into BPF map  
 - XDP + TC programs attached  
-- Live traffic counters (once peers connect)
+- Live traffic once peers connect  
 
 ---
 
-## 5. Uninstall (Optional)
+# ⚙️ Runtime Behavior
+
+### XDP (Ingress)
+- Attached to `$INTERFACE`
+- Counts **DOWN** traffic
+- Classifies by destination port
+- Keys by client IP
+
+### TC (Egress)
+- Attached to `$INTERFACE` egress
+- Counts **UP** traffic
+- Classifies by source port
+- Keys by client IP
+
+### Aggregation
+- Runs every **1 minute**
+- Persists counters to SQLite
+- Resets counters to zero
+- Optionally cleans zero keys (if `PINNED_MAPS=1`)
+
+### Live Dashboard
+- Prints every **30 seconds**
+- Shows active clients only (non‑zero counters)
+
+---
+
+# 🗂️ SQLite Schema
+
+Each row contains:
+
+| Column | Description |
+|--------|-------------|
+| timestamp | Unix minute timestamp |
+| ip | IPv4/IPv6 address |
+| dns | Reverse lookup result |
+| consensus_up / consensus_down | Port 9981 |
+| siamux_up / siamux_down | Port 9984 TCP |
+| quic_up / quic_down | Port 9984 UDP |
+
+---
+
+# 🧪 Development
+
+### Build only
+
+```bash
+sudo make build
+```
+
+### Uninstall
 
 ```bash
 chmod +x uninstall.sh
 sudo ./uninstall.sh
 ```
 
-This removes:
+Removes:
 
-- Systemd service  
 - Binary  
-- `/var/lib/collector` directory  
+- Systemd unit  
+- `/var/lib/collector`  
 
-`/etc/collector.env` is left in place for safety.
+`/etc/collector.env` is preserved.
 
 ---
 
-## 6. Requirements
+# 📊 Example Output
 
-- Linux kernel **5.x or newer**  
-- Root privileges (required for XDP/TC)  
-- No kernel headers needed (you ship the compiled BPF object)  
-- bpffs is mounted automatically by the loader  
+```
+---- LIVE TRAFFIC (semantic counters) ----
+IPv4 10.20.31.114  consensus(down/up)=0 B/0 B  siamux(down/up)=748 B/26.07 KB  quic(down/up)=0 B/0 B
+-------------------------------------------
+
+---- STORED TRAFFIC (aggregated today) ----
+IPv4 10.20.31.114  consensus(down/up)=0 B/0 B  siamux(down/up)=1.46 KB/52.13 KB  quic(down/up)=0 B/0 B
+-------------------------------------------
+```
+
+---
+
+# 🧭 Roadmap
+
+- Web dashboard (HTML/JS)  
+- Historical charts (SQLite → graphs)  
+- Prometheus exporter  
+- Alerting for abnormal 9981 spikes  
+- Optional remote API sync  
+- Configurable port sets (already implemented)  
+- JSON/CSV export  
 
 ---

@@ -15,13 +15,6 @@ accounting daemon for Sia hostd using XDP + TC eBPF.
 - Systemd service
 - Installer + uninstaller scripts
 
-## 📦 Included in this release
-- `collector` (compiled Go binary)
-- `sia_bpfel.o` (compiled eBPF program)
-- `install.sh`
-- `uninstall.sh`
-- `collector.service`
-- `CHANGELOG.md`
 
 # 📦 Installation
 

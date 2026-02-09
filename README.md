@@ -1,3 +1,28 @@
+# Sia Collector
+
+This is a high‑performance traffic
+accounting daemon for Sia hostd using XDP + TC eBPF.
+
+## 🚀 Features
+- XDP ingress + TC egress traffic accounting
+- Per‑client IPv4/IPv6 counters
+- Port classification for 9981 + 9984 (TCP/UDP)
+- SQLite aggregation (1‑minute flush)
+- DNS reverse lookup caching
+- Live dashboard (30‑second refresh)
+- Graceful shutdown with final flush + counter reset
+- Automatic bpffs mounting + map pinning
+- Systemd service
+- Installer + uninstaller scripts
+
+## 📦 Included in this release
+- `collector` (compiled Go binary)
+- `sia_bpfel.o` (compiled eBPF program)
+- `install.sh`
+- `uninstall.sh`
+- `collector.service`
+- `CHANGELOG.md`
+
 # 📦 Installation
 
 ## 1. Download the Release

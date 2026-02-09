@@ -22,7 +22,7 @@ accounting daemon for Sia hostd using XDP + TC eBPF.
 
 Go to:
 
-**`https://github.com/back2basic/collector/releases` [(github.com in Bing)](https://www.bing.com/search?q="https%3A%2F%2Fgithub.com%2Fback2basic%2Fcollector%2Freleases")**
+**`https://github.com/back2basic/collector/releases`**
 
 Download the following files from the latest release:
 

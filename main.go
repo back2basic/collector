@@ -11,6 +11,7 @@ import (
 	"github.com/back2basic/collector/agg"
 	"github.com/back2basic/collector/bpfgo"
 	"github.com/back2basic/collector/live"
+	"github.com/back2basic/collector/prom"
 	"github.com/back2basic/collector/storage"
 )
 
@@ -39,6 +40,13 @@ func main() {
 	// Start live dashboard
 	lv := live.New(h)
 	go lv.Run()
+
+	// Start Prometheus exporter
+	promAddr := os.Getenv("PROMETHEUS_ADDR")
+	if promAddr == "" {
+		promAddr = ":9100"
+	}
+	go prom.Run(h, promAddr)
 
 	// Wait for shutdown signal
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
